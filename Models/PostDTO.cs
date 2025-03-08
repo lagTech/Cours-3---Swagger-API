@@ -51,6 +51,8 @@ namespace MVC.Models
         /// </summary>
         public string? Url { get; init; }
 
+        public Guid? BlobImage { get; init; }  
+
         // Constructeur
         public PostReadDTO() { }
 
@@ -58,41 +60,33 @@ namespace MVC.Models
         {
             Id = post.Id;
             Title = post.Title;
-            Category = post.Category;
+            Category = post.Category; 
             User = post.User;
             Like = post.Like;
             Dislike = post.Dislike;
             Created = post.Created;
             Url = post.Url;
+            BlobImage = post.BlobImage;
         }
     }
 
     public class PostCreateDTO
     {
         [FromForm(Name = "title")]
-        public string? Title { get; set; }
+        public required string Title { get; set; }
 
         [FromForm(Name = "category")]
-        public Category Category { get; set; }
+        public int Category { get; set; }
 
         [FromForm(Name = "user")]
-        public string? User { get; set; }
+        public required string User { get; set; }
 
         [FromForm(Name = "image")]
-        public IFormFile? Image { get; set; }
+        public required IFormFile Image { get; set; }
 
         public PostCreateDTO() { }
 
-        // Ajout d'un constructeur pour les API
-        public PostCreateDTO(string Title, string Category, string User, IFormFile Image)
-        {
-            this.Title = Title;
-            this.Category = (Category)Enum.Parse(typeof(Category), Category);
-            this.User = User;
-            this.Image = Image;
-        }
-
-        public PostCreateDTO(string Title, Category Category, string User, IFormFile Image)
+        public PostCreateDTO(string Title, int Category, string User, IFormFile Image)
         {
             this.Title = Title;
             this.Category = Category;
@@ -100,4 +94,5 @@ namespace MVC.Models
             this.Image = Image;
         }
     }
+
 }

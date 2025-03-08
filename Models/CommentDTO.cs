@@ -19,6 +19,8 @@ namespace MVC.Models
 
         public DateTime Created { get; init; }
 
+        public bool IsApproved { get; init; }
+
         public Guid PostId { get; init; }
 
         public CommentReadDTO(Comment comment)
@@ -30,6 +32,7 @@ namespace MVC.Models
             Dislike = comment.Dislike;
             Created = comment.Created;
             PostId = comment.PostId;
+            IsApproved = comment.IsApproved;
         }
     }
 

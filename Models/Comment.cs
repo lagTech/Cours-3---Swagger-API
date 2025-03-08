@@ -15,6 +15,14 @@ namespace MVC.Models
     // Les structures suivantes démontres en partie les schema que nous allons utiliser
     //
 
+    [NotMapped]
+    public class CommentIndexViewModel
+    {
+        public List<Comment> Comments { get; set; }
+        public int CurrentPage { get; set; } = 1;
+        public int TotalPages { get; set; }
+        public int PageSize { get; set; } = 10;
+    }
     public class Comment
     {
         // Référence pour les Accessor ( Get, Set, Init )

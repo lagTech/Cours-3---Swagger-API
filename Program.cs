@@ -31,10 +31,8 @@ builder.Services.AddOpenApi();
 builder.Services.AddDbContext<ApplicationDbContextInMemory>(options => options.UseInMemoryDatabase("InMemoryDb"));
 builder.Services.AddScoped<IRepository_mini, EFRepository_mini_InMemory>();
 
-builder.Services.Configure<FormOptions>(options =>
-{
-    options.MultipartBodyLengthLimit = 50 * 1024 * 1024; // 50MB limit
-});
+// Add this to your builder configuration in Program.cs
+builder.Services.Configure<ApplicationConfiguration>(builder.Configuration.GetSection("ApplicationConfiguration"));
 
 
 // Register BlobController as a service
@@ -51,39 +49,39 @@ var app = builder.Build();
 // Use CORS before endpoints
 app.UseCors("AllowAllOrigins");
 
-app.Use(async (context, next) =>
-{
-    Console.WriteLine($"Request Content-Type: {context.Request.ContentType}");
-    foreach (var header in context.Request.Headers)
-    {
-        Console.WriteLine($"Header: {header.Key} = {header.Value}");
-    }
+//app.Use(async (context, next) =>
+//{
+//    Console.WriteLine($"Request Content-Type: {context.Request.ContentType}");
+//    foreach (var header in context.Request.Headers)
+//    {
+//        Console.WriteLine($"Header: {header.Key} = {header.Value}");
+//    }
 
-    // Log form data
-    if (context.Request.HasFormContentType)
-    {
-        Console.WriteLine(" Request contains form-data!");
-        var form = await context.Request.ReadFormAsync();
-        foreach (var key in form.Keys)
-        {
-            Console.WriteLine($"Form field: {key} = {form[key]}");
-        }
+//    // Log form data
+//    if (context.Request.HasFormContentType)
+//    {
+//        Console.WriteLine(" Request contains form-data!");
+//        var form = await context.Request.ReadFormAsync();
+//        foreach (var key in form.Keys)
+//        {
+//            Console.WriteLine($"Form field: {key} = {form[key]}");
+//        }
 
-        if (form.Files.Count > 0)
-        {
-            foreach (var file in form.Files)
-            {
-                Console.WriteLine($" Uploaded file: {file.FileName} (Size: {file.Length} bytes)");
-            }
-        }
-    }
-    else
-    {
-        Console.WriteLine(" Request does NOT contain form-data!");
-    }
+//        if (form.Files.Count > 0)
+//        {
+//            foreach (var file in form.Files)
+//            {
+//                Console.WriteLine($" Uploaded file: {file.FileName} (Size: {file.Length} bytes)");
+//            }
+//        }
+//    }
+//    else
+//    {
+//        Console.WriteLine(" Request does NOT contain form-data!");
+//    }
 
-    await next();
-});
+//    await next();
+//});
 
 
 // Configure the HTTP request pipeline.
@@ -98,49 +96,104 @@ app.UseHttpsRedirection();
 
 
 //API 
-app.MapPost("/Posts/Add", async (IRepository_mini repo, BlobController blobController, [FromForm] PostCreateDTO post) =>
+
+
+// Replace your current /Posts/Add endpoint with this one:
+app.MapPost("/Posts/Add", async (HttpContext context, IRepository_mini repo, BlobController blobController) =>
 {
-    if (post == null)
-    {
-        Console.WriteLine(" post is NULL");
-        return Results.BadRequest("Invalid request. Ensure the form data is correctly sent.");
-    }
-
-    Console.WriteLine($" Title: {post.Title}");
-    Console.WriteLine($" Category: {post.Category}");
-    Console.WriteLine($" User: {post.User}");
-    Console.WriteLine($" Image: {(post.Image != null ? post.Image.FileName : "NULL")}");
-
-    if (post.Image == null)
-    {
-        return Results.BadRequest("Image file is required.");
-    }
+    Console.WriteLine("Posts/Add endpoint called with direct form handling");
 
     try
     {
+        if (!context.Request.HasFormContentType)
+        {
+            Console.WriteLine("Request is not form data");
+            return Results.BadRequest("Expected multipart/form-data request");
+        }
+
+        var form = await context.Request.ReadFormAsync();
+
+        Console.WriteLine("Form data received:");
+        foreach (var key in form.Keys)
+        {
+            Console.WriteLine($"  {key} = {form[key]}");
+        }
+
+        Console.WriteLine("Form files:");
+        foreach (var file in form.Files)
+        {
+            Console.WriteLine($"  {file.Name} = {file.FileName} ({file.Length} bytes)");
+        }
+
+        // Check for required fields
+        if (!form.ContainsKey("title") || string.IsNullOrEmpty(form["title"]))
+        {
+            Console.WriteLine("Missing title");
+            return Results.BadRequest("Title is required");
+        }
+
+        if (!form.ContainsKey("user") || string.IsNullOrEmpty(form["user"]))
+        {
+            Console.WriteLine("Missing user");
+            return Results.BadRequest("User is required");
+        }
+
+        // Get the image file
+        var imageFile = form.Files.GetFile("image");
+        if (imageFile == null)
+        {
+            // Try to find the file if it has a different field name
+            if (form.Files.Count > 0)
+            {
+                imageFile = form.Files[0]; // Use the first file regardless of its name
+                Console.WriteLine($"No file with name 'image' found, using first file: {imageFile.Name}");
+            }
+            else
+            {
+                Console.WriteLine("No image file found");
+                return Results.BadRequest("Image file is required");
+            }
+        }
+
+        // Extract form values
+        string title = form["title"]!;
+        string user = form["user"]!;
+        int category = 0;
+        if (form.ContainsKey("category") && !string.IsNullOrEmpty(form["category"]))
+        {
+            int.TryParse(form["category"], out category);
+        }
+
+        Console.WriteLine($"Parsed values: Title={title}, Category={category}, User={user}, Image={imageFile.FileName}");
+
+        // Process the upload
         Guid guid = Guid.NewGuid();
-        string imageUrl = await blobController.PushImageToBlob(post.Image, guid);
+        string imageUrl = await blobController.PushImageToBlob(imageFile, guid);
 
         Post newPost = new Post
         {
-            Title = post.Title,
-            Category = post.Category,
-            User = post.User,
+            Title = title,
+            Category = (Category)category,
+            User = user,
             BlobImage = guid,
             Url = imageUrl
         };
 
+        Console.WriteLine("Creating post via repository");
         return await repo.CreateAPIPost(newPost);
     }
     catch (Exception ex)
     {
-        Console.WriteLine($" Error: {ex}");
-        return Results.BadRequest("An error occurred while processing the request.");
+        Console.WriteLine($"Exception in Posts/Add: {ex.Message}");
+        Console.WriteLine($"Stack trace: {ex.StackTrace}");
+        return Results.BadRequest($"Error processing request: {ex.Message}");
     }
-}).DisableAntiforgery();
-
-
-app.MapGet("/Posts", async (IRepository_mini repo) => await repo.GetPosts());
+})
+.Produces<PostReadDTO>(StatusCodes.Status201Created)
+.Produces(StatusCodes.Status400BadRequest)
+.WithName("Posts_Add")
+.WithOpenApi()
+.DisableAntiforgery();
 
 app.MapGet("/Posts/{id}", async (IRepository_mini repo, Guid id) =>
 {
@@ -153,6 +206,92 @@ app.MapDelete("/Posts/{id}", async (IRepository_mini repo, Guid id) =>
     var result = await repo.DeletePost(id);
     return result ? Results.Ok() : Results.NotFound();
 });
+
+app.MapGet("/Posts/Index", async (IRepository_mini repo, int page = 1, int pageSize = 10) =>
+{
+    var result = await repo.GetPostIndex(page, pageSize);
+    return Results.Ok(result);
+});
+
+app.MapGet("/Posts/Count", async (IRepository_mini repo) =>
+{
+    int count = await repo.GetPostCount();
+    return Results.Ok(new { totalPosts = count });
+});
+
+// Increment post likes
+app.MapPost("/Posts/{id}/Like", async (IRepository_mini repo, Guid id) =>
+{
+    var result = await repo.IncrementPostLike(id);
+    return result ? Results.Ok() : Results.NotFound();
+});
+
+// Increment post dislikes
+app.MapPost("/Posts/{id}/Dislike", async (IRepository_mini repo, Guid id) =>
+{
+    var result = await repo.IncrementPostDislike(id);
+    return result ? Results.Ok() : Results.NotFound();
+});
+
+
+
+//Comments
+// Create a new comment
+app.MapPost("/Comments/Add", async (IRepository_mini repo, [FromBody] Comment comment) =>
+{
+    return await repo.CreateAPIComment(comment);
+});
+
+// Get a single comment by ID
+app.MapGet("/Comments/{id}", async (IRepository_mini repo, Guid id) =>
+{
+    var comment = await repo.GetCommentById(id);
+    return comment != null ? Results.Ok(comment) : Results.NotFound();
+});
+
+// Delete a comment
+app.MapDelete("/Comments/{id}", async (IRepository_mini repo, Guid id) =>
+{
+    var result = await repo.DeleteComment(id);
+    return result ? Results.Ok() : Results.NotFound();
+});
+
+// Get paginated comments
+app.MapGet("/Comments/Index", async (IRepository_mini repo, int page = 1, int pageSize = 10) =>
+{
+    var result = await repo.GetCommentIndex(page, pageSize);
+    return Results.Ok(result);
+});
+
+// Get the total number of comments
+app.MapGet("/Comments/Count", async (IRepository_mini repo) =>
+{
+    int count = await repo.GetCommentCount();
+    return Results.Ok(new { totalComments = count });
+});
+
+// Approve a comment
+app.MapPost("/Comments/{id}/Approve", async (IRepository_mini repo, Guid id) =>
+{
+    var result = await repo.ApproveComment(id);
+    return result ? Results.Ok() : Results.NotFound();
+});
+
+// Increment comment likes
+app.MapPost("/Comments/{id}/Like", async (IRepository_mini repo, Guid id) =>
+{
+    var result = await repo.IncrementCommentLike(id);
+    return result ? Results.Ok() : Results.NotFound();
+});
+
+// Increment comment dislikes
+app.MapPost("/Comments/{id}/Dislike", async (IRepository_mini repo, Guid id) =>
+{
+    var result = await repo.IncrementCommentDislike(id);
+    return result ? Results.Ok() : Results.NotFound();
+});
+
+
 
 
 app.Run();
