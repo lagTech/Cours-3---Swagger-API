@@ -7,6 +7,9 @@ using MVC.Data;
 using Microsoft.AspNetCore.Mvc;
 using MVC.Business;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.OpenApi.Any;
+using Microsoft.OpenApi.Models;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -198,13 +201,15 @@ app.MapPost("/Posts/Add", async (HttpContext context, IRepository_mini repo, Blo
 app.MapGet("/Posts/{id}", async (IRepository_mini repo, Guid id) =>
 {
     var post = await repo.GetPostById(id);
-    return post != null ? Results.Ok(post) : Results.NotFound();
+    return post != null ? Results.Ok(post) 
+    : Results.NotFound(new { message = $"No post found with ID: {id}" });
 });
 
 app.MapDelete("/Posts/{id}", async (IRepository_mini repo, Guid id) =>
 {
     var result = await repo.DeletePost(id);
-    return result ? Results.Ok() : Results.NotFound();
+    return result ? Results.Ok(new { message = $"Post with ID {id} was successfully deleted" }) 
+    : Results.NotFound(new { message = $"No post found with ID: {id}" });
 });
 
 app.MapGet("/Posts/Index", async (IRepository_mini repo, int page = 1, int pageSize = 10) =>
@@ -223,14 +228,15 @@ app.MapGet("/Posts/Count", async (IRepository_mini repo) =>
 app.MapPost("/Posts/{id}/Like", async (IRepository_mini repo, Guid id) =>
 {
     var result = await repo.IncrementPostLike(id);
-    return result ? Results.Ok() : Results.NotFound();
+    return result ? Results.Ok() 
+    : Results.NotFound(new { message = $"No post found with ID: {id}" });
 });
 
 // Increment post dislikes
 app.MapPost("/Posts/{id}/Dislike", async (IRepository_mini repo, Guid id) =>
 {
     var result = await repo.IncrementPostDislike(id);
-    return result ? Results.Ok() : Results.NotFound();
+    return result ? Results.Ok() : Results.NotFound(new { message = $"No post found with ID: {id}" });
 });
 
 
@@ -239,14 +245,94 @@ app.MapPost("/Posts/{id}/Dislike", async (IRepository_mini repo, Guid id) =>
 // Create a new comment
 app.MapPost("/Comments/Add", async (IRepository_mini repo, [FromBody] Comment comment) =>
 {
-    return await repo.CreateAPIComment(comment);
+    if (comment == null)
+    {
+        return Results.BadRequest(new { message = "Comment data is required" });
+    }
+
+    if (string.IsNullOrEmpty(comment.Commentaire))
+    {
+        return Results.BadRequest(new { message = "Comment text is required" });
+    }
+
+    if (string.IsNullOrEmpty(comment.User))
+    {
+        return Results.BadRequest(new { message = "User is required" });
+    }
+
+    if (comment.PostId == Guid.Empty)
+    {
+        return Results.BadRequest(new { message = "Post ID is required" });
+    }
+
+    try
+    {
+        return await repo.CreateAPIComment(comment);
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.Produces<CommentReadDTO>(StatusCodes.Status201Created)
+.Produces(StatusCodes.Status400BadRequest)
+.WithName("Comments_Add")
+.WithOpenApi(operation =>
+{
+    // Add request body schema
+    operation.RequestBody = new OpenApiRequestBody
+    {
+        Content = new Dictionary<string, OpenApiMediaType>
+        {
+            ["application/json"] = new OpenApiMediaType
+            {
+                Schema = new OpenApiSchema
+                {
+                    Type = "object",
+                    Properties = new Dictionary<string, OpenApiSchema>
+                    {
+                        ["commentaire"] = new OpenApiSchema
+                        {
+                            Type = "string",
+                            Description = "The comment text"
+                        },
+                        ["user"] = new OpenApiSchema
+                        {
+                            Type = "string",
+                            Description = "The username of the commenter"
+                        },
+                        ["postId"] = new OpenApiSchema
+                        {
+                            Type = "string",
+                            Format = "uuid",
+                            Description = "The ID of the post this comment belongs to"
+                        }
+                    },
+                    Required = new HashSet<string> { "commentaire", "user", "postId" }
+                },
+                Example = new OpenApiObject
+                {
+                    ["commentaire"] = new OpenApiString("This is a sample comment"),
+                    ["user"] = new OpenApiString("JohnDoe"),
+                    ["postId"] = new OpenApiString("3fa85f64-5717-4562-b3fc-2c963f66afa6")
+                }
+            }
+        },
+        Required = true
+    };
+
+    return operation;
 });
+
+
 
 // Get a single comment by ID
 app.MapGet("/Comments/{id}", async (IRepository_mini repo, Guid id) =>
 {
     var comment = await repo.GetCommentById(id);
-    return comment != null ? Results.Ok(comment) : Results.NotFound();
+    return comment != null
+        ? Results.Ok(comment)
+        : Results.NotFound(new { message = $"No comment found with ID: {id}" });
 });
 
 // Delete a comment
